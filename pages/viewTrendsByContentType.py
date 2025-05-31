@@ -75,6 +75,24 @@ fig_bar = px.bar(
 )
 st.plotly_chart(fig_bar, use_container_width=True)
 
+# --- Total Views per Content Type Bar Chart ---
+st.subheader("Total Views per Content Type")
+
+total_views_by_type = df_filtered.groupby(
+    'Content Type')['Views'].sum().reset_index()
+
+fig_total_views = px.bar(
+    total_views_by_type.sort_values('Views', ascending=False),
+    x='Content Type',
+    y='Views',
+    title='Total Views per Content Type',
+    labels={'Content Type': 'Content Type', 'Views': 'Total Views'},
+    template='plotly_dark'
+)
+
+st.plotly_chart(fig_total_views, use_container_width=True)
+
+
 # Select Content Type for detailed view
 content_types = video_counts['Content Type'].dropna().unique()
 selected_content = st.selectbox(

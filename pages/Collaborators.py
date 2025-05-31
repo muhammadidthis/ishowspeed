@@ -1,78 +1,104 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import ast # Import ast module for safe evaluation of string literals
-import os # Import os module to check for file existence
+import ast
+import os
 
 # Load dataset
-# IMPORTANT: Ensure 'ishowspeed_yt_dataset_all.csv' is in the same directory as your Streamlit app
 csv_file_path = 'ishowspeed_yt_dataset_all.csv'
 
 
-
-# Use st.cache_data to cache the DataFrame loading for performance
 @st.cache_data
 def load_data(file_path):
     if not os.path.exists(file_path):
-        st.error(f"Error: CSV file '{file_path}' not found. Please ensure it's in the same directory as your Streamlit app.")
+        st.error(f"Error: CSV file '{file_path}' not found.")
         st.stop()
     try:
         df = pd.read_csv(file_path)
         df['Date Posted'] = pd.to_datetime(df['Date Posted'])
-        # Ensure 'Views', 'Likes', 'Comments' are numeric and handle potential NaNs
         df['Views'] = pd.to_numeric(df['Views'], errors='coerce').fillna(0)
         df['Likes'] = pd.to_numeric(df['Likes'], errors='coerce').fillna(0)
-        df['Comments'] = pd.to_numeric(df['Comments'], errors='coerce').fillna(0)
+        df['Comments'] = pd.to_numeric(
+            df['Comments'], errors='coerce').fillna(0)
         return df
     except Exception as e:
-        st.error(f"An error occurred while loading or processing the data: {e}")
+        st.error(f"An error occurred while loading the data: {e}")
         st.stop()
+
 
 df = load_data(csv_file_path)
 
 st.set_page_config(layout="wide")
-st.title("🤝 Collaboration View Trends")
+st.title("🤝 Views Trend: Collaborations vs Solo Content")
 
-# Clean Collaborators column: remove duplicates and format properly
-def clean_collaborators(text):
-    """
-    Safely parses a string representation of a list of collaborators into a Python list.
-    Handles NaN values and malformed strings.
-    """
-    if pd.isna(text) or text.strip() == "[]":
-        return []
+# ----- COLLABORATION VS SOLO ANALYSIS -----
+
+
+def parse_collaborators(collab_str):
     try:
-        # Safely evaluate the string as a Python literal (list).
-        collab_list = ast.literal_eval(text)
+        collab_list = ast.literal_eval(collab_str)
         if isinstance(collab_list, list):
-            # Remove duplicates and normalize names by stripping whitespace
-            clean_list = list({c.strip() for c in collab_list if isinstance(c, str) and c.strip()})
+            clean_list = list(set([x.strip()
+                              for x in collab_list if x.strip() != '']))
             return clean_list
         else:
-            return [] # Not a list as expected
-    except (ValueError, SyntaxError):
-        return [] # Handle cases where string is not a valid literal
+            return []
+    except:
+        return []
 
-# Apply cleaning to create a list column
-df['Collaborators List'] = df['Collaborators'].apply(clean_collaborators)
 
-# Explode the list to get one collaborator per row
+df['Collaborators List'] = df['Collaborators'].apply(parse_collaborators)
+df['Is Collaboration'] = df['Collaborators List'].apply(
+    lambda x: 'Yes' if len(x) > 0 else 'No')
+
+# Create Month column
+df['Month'] = df['Date Posted'].dt.to_period('M').dt.to_timestamp()
+
+# Aggregate monthly views by collaboration status
+monthly_views = df.groupby(['Month', 'Is Collaboration'])[
+    'Views'].sum().reset_index()
+
+# Plot Monthly Views Line Chart
+fig = px.line(
+    monthly_views,
+    x='Month',
+    y='Views',
+    color='Is Collaboration',
+    labels={
+        'Views': 'Total Views',
+        'Month': 'Month',
+        'Is Collaboration': 'Collaboration Status'
+    },
+    title='Monthly View Trends: Collaborations vs Solo',
+    template='plotly_dark'
+)
+st.plotly_chart(fig, use_container_width=True)
+
+# Total video and view counts
+counts = df['Is Collaboration'].value_counts().reindex(
+    ['Yes', 'No'], fill_value=0)
+views = df.groupby('Is Collaboration')['Views'].sum().reindex(
+    ['Yes', 'No'], fill_value=0)
+
+col1, col2 = st.columns(2)
+col1.metric("Number of Collaboration Videos", counts['Yes'])
+col2.metric("Number of Solo Videos", counts['No'])
+
+col3, col4 = st.columns(2)
+col3.metric("Total Views Collaboration Videos", f"{views['Yes']:,}")
+col4.metric("Total Views Solo Videos", f"{views['No']:,}")
+
+# ----- TOP COLLABORATORS ANALYSIS -----
 exploded = df.explode('Collaborators List').reset_index(drop=True)
-
-# Filter out rows with no collaborator
 exploded = exploded[exploded['Collaborators List'].notna() & (
     exploded['Collaborators List'] != '')]
 
 if not exploded.empty:
-    # Aggregate total views by collaborator
     collab_views = exploded.groupby('Collaborators List')[
         'Views'].sum().reset_index()
-
-    # Sort descending and get top 10 collaborators
     top_collaborators = collab_views.sort_values(
         by='Views', ascending=False).head(10)
 
-    # Bar chart of total views for top collaborators
     st.subheader("Top 10 Collaborators by Total Views")
     fig = px.bar(
         top_collaborators,
@@ -85,37 +111,32 @@ if not exploded.empty:
     st.plotly_chart(fig, use_container_width=True)
 
     st.write("""
-    The chart above highlights IShowSpeed's most impactful collaborators in terms of total views generated from their joint videos.
-    It indicates which partnerships have resonated most strongly with his audience.
+    The chart above shows which collaborators brought in the highest total views across all videos.
     """)
 
-    # Collaborator selection for detailed video list and metrics
     all_collaborators = sorted(exploded['Collaborators List'].unique())
     selected_collaborator = st.selectbox(
         "Select a Collaborator", all_collaborators)
 
-    # Filter videos with the selected collaborator
-    # Use .drop_duplicates(subset=['Video ID']) to ensure each video is shown only once
-    collab_videos = exploded[exploded['Collaborators List']
-                             == selected_collaborator].drop_duplicates(subset=['Video ID'])
+    collab_videos = exploded[exploded['Collaborators List'] ==
+                             selected_collaborator].drop_duplicates(subset=['Video ID'])
 
     total_videos = collab_videos['Video ID'].nunique()
     total_views = collab_videos['Views'].sum()
 
-    col1, col2 = st.columns(2)
-    with col1:
+    col5, col6 = st.columns(2)
+    with col5:
         st.metric("Total Unique Videos", total_videos)
-    with col2:
-        st.metric("Total Views", f"{total_views:,.0f}") # Formatted with commas
+    with col6:
+        st.metric("Total Views", f"{total_views:,.0f}")
 
     st.subheader(f"Videos featuring {selected_collaborator}")
 
-    collab_videos_sorted = collab_videos.sort_values(by='Views', ascending=False)
+    collab_videos_sorted = collab_videos.sort_values(
+        by='Views', ascending=False)
 
     for _, video in collab_videos_sorted.iterrows():
-        # Correct YouTube video URL
         video_url = f"https://www.youtube.com/watch?v={video['Video ID']}"
-        # Correct YouTube thumbnail URL (hqdefault is high quality)
         thumbnail_url = f"https://img.youtube.com/vi/{video['Video ID']}/hqdefault.jpg"
         st.markdown(f"""
         <div style="display: flex; align-items: center; margin-bottom: 1em; padding: 10px; border-radius: 8px; background-color: #262730;">
@@ -131,4 +152,4 @@ if not exploded.empty:
         </div>
         """, unsafe_allow_html=True)
 else:
-    st.warning("No collaboration data found or processed. Please check the 'Collaborators' column in your CSV for valid list formats like `['Collaborator Name']` or `[]`.")
+    st.warning("No collaboration data found or processed.")
