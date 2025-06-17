@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from streamlit_plotly_events import plotly_events
 
 # Load dataset
-df = pd.read_csv('ishowspeed_cleaned_full.csv')
+df = pd.read_csv('ishowspeed_cleaned_processed.csv')
 
 # Rename columns to match YouTube version
 df.rename(columns={
